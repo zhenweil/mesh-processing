@@ -1,4 +1,3 @@
-import vedo
 import trimesh
 import numpy as np
 from queue import Queue
@@ -8,6 +7,13 @@ from collections import defaultdict
 class EZMesh:
     def __init__(self, fname):
         mesh = trimesh.load(fname)
+        mesh.merge_vertices()
+
+        if mesh.is_watertight:
+            print("The mesh is closed")
+        else:
+            print("The mesh has boundaries or holes.")
+            print("Number of boundary edges: ", len(mesh.facets_boundary))
         self.vertices = mesh.vertices
         self.faces = mesh.faces
         self.normals = mesh.face_normals
@@ -70,7 +76,7 @@ if __name__=="__main__":
     fname = "/home/zhenweil/mesh-processing/data/holding_eggs_under_arms.obj"   
     my_mesh = EZMesh(fname)
 
-    face_group = []
+    segmentation = []
     face_grouped = [False for _ in range(my_mesh.num_faces)]
     
     for i in range(my_mesh.num_faces):
@@ -95,13 +101,22 @@ if __name__=="__main__":
                 explored[conn_face_idx] = True
                 next_normal = my_mesh.normals[conn_face_idx]
                 angle = angle_between_vec(group_normal, next_normal)
-                if angle < 20: 
+                if angle < 45: 
                     to_be_explored.put(conn_face_idx)
                     face_grouped[conn_face_idx] = True
+                else:
+                    print("large angle deviation: ", angle)
 
-        face_group.append(curr_group)
-        print(f"Finished group {len(face_group)}")
+        segmentation.append(curr_group)
+        print(f"Finished group {len(segmentation)}")
         print(f"Current face: {i}, total face: {my_mesh.num_faces}")
     
-    #new_mesh = vedo.Mesh([vertices, faces])
-    #vedo.show(new_mesh)
+    num_groups = len(segmentation)
+    colors = np.random.rand(num_groups, 3)
+    face_colors = np.zeros((my_mesh.num_faces, 3), dtype=float)
+    for seg_idx, face_indices in enumerate(segmentation):
+        face_colors[face_indices] = colors[seg_idx]
+
+    new_mesh = trimesh.Trimesh(vertices=my_mesh.vertices, faces=my_mesh.faces, process=False)
+    new_mesh.visual.face_colors = face_colors
+    new_mesh.show(smooth=False) 
