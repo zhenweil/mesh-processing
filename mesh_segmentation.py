@@ -6,14 +6,17 @@ from collections import defaultdict
 
 class EZMesh:
     def __init__(self, fname):
-        mesh = trimesh.load(fname)
-        mesh.merge_vertices()
+        mesh = trimesh.load(fname, process=False)
+        mesh.merge_vertices(digits_vertex=5)
+        mesh.update_faces(mesh.nondegenerate_faces())
+        mesh.remove_unreferenced_vertices()
+        mesh.fix_normals()
 
         if mesh.is_watertight:
             print("The mesh is closed")
         else:
             print("The mesh has boundaries or holes.")
-            print("Number of boundary edges: ", len(mesh.facets_boundary))
+            print("components:", len(mesh.split(only_watertight=False)))
         self.vertices = mesh.vertices
         self.faces = mesh.faces
         self.normals = mesh.face_normals
@@ -66,7 +69,9 @@ class EZMesh:
 
     def segment_based_on_normal(self, normal_thresh):
         segmentation = []
-        face_grouped = [False for _ in range(my_mesh.num_faces)]
+        normals = []
+        centroids = []
+        face_grouped = [False for _ in range(self.num_faces)]
 
         for i in range(self.num_faces):
             if face_grouped[i] == True:
@@ -74,20 +79,26 @@ class EZMesh:
             curr_group = []
             to_be_explored = Queue() 
             to_be_explored.put(i)
-            explored = [False for _ in range(my_mesh.num_faces)]
+            explored = [False for _ in range(self.num_faces)]
             explored[i] = True
             face_grouped[i] = True
-            group_normal = my_mesh.normals[i]
+            normals.append(self.normals[i])
+            curr_face = self.faces[i]
+            vtx0 = self.vertices[curr_face[0],:]
+            vtx1 = self.vertices[curr_face[1],:]
+            vtx2 = self.vertices[curr_face[2],:]
+            centroid = (vtx0 + vtx1 + vtx2)/3.0
+            centroids.append(centroid)
                         
             while(not to_be_explored.empty()):
                 curr_face_idx = to_be_explored.get()
                 curr_group.append(curr_face_idx)
-                connected_faces = my_mesh.get_connected_faces_from_face(curr_face_idx)
+                connected_faces = self.get_connected_faces_from_face(curr_face_idx)
                 for conn_face_idx in connected_faces:
                     if explored[conn_face_idx] == True or face_grouped[conn_face_idx] == True:
                         continue
                     explored[conn_face_idx] = True
-                    next_normal = my_mesh.normals[conn_face_idx]
+                    next_normal = self.normals[conn_face_idx]
                     angle = angle_between_vec(group_normal, next_normal)
                     if angle < normal_thresh: 
                         to_be_explored.put(conn_face_idx)
@@ -95,7 +106,7 @@ class EZMesh:
 
             segmentation.append(curr_group)
 
-        return segmentation
+        return segmentation, centroids, normals
 
 def angle_between_vec(v1, v2):
     assert (v1.shape == (3,1) and v1.shape==v2.shape) or (v1.shape == (3,) and v1.shape == v2.shape)
@@ -106,7 +117,7 @@ def angle_between_vec(v1, v2):
 
 if __name__=="__main__":
 
-    fname = "/home/zhenweil/mesh-processing/data/holding_eggs_under_arms.obj"   
+    fname = "/home/zhenweil/mesh-processing/data/bunny_holding_eggs_repaired.stl"   
     my_mesh = EZMesh(fname)
     segmentation = my_mesh.segment_based_on_normal(90)
 
