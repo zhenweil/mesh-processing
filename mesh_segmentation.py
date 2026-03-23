@@ -72,8 +72,9 @@ class EZMesh:
         normals = []
         centroids = []
         face_grouped = [False for _ in range(self.num_faces)]
+        order = np.random.permutation(self.num_faces)
 
-        for i in range(self.num_faces):
+        for i in order:
             if face_grouped[i] == True:
                 continue
             curr_group = []
@@ -82,7 +83,8 @@ class EZMesh:
             explored = [False for _ in range(self.num_faces)]
             explored[i] = True
             face_grouped[i] = True
-            normals.append(self.normals[i])
+            group_normal = self.normals[i]
+            normals.append(group_normal)
             curr_face = self.faces[i]
             vtx0 = self.vertices[curr_face[0],:]
             vtx1 = self.vertices[curr_face[1],:]
@@ -106,6 +108,9 @@ class EZMesh:
 
             segmentation.append(curr_group)
 
+        centroids = np.asarray(centroids)
+        normals = np.asarray(normals)
+
         return segmentation, centroids, normals
 
 def angle_between_vec(v1, v2):
@@ -119,7 +124,7 @@ if __name__=="__main__":
 
     fname = "/home/zhenweil/mesh-processing/data/bunny_holding_eggs_repaired.stl"   
     my_mesh = EZMesh(fname)
-    segmentation = my_mesh.segment_based_on_normal(90)
+    segmentation, centroids, normals = my_mesh.segment_based_on_normal(90)
 
     print("Number of segmentation: ", len(segmentation))
     
@@ -131,4 +136,7 @@ if __name__=="__main__":
 
     new_mesh = trimesh.Trimesh(vertices=my_mesh.vertices, faces=my_mesh.faces, process=False)
     new_mesh.visual.face_colors = face_colors
-    new_mesh.show(smooth=False) 
+    segments = np.stack([centroids, centroids + normals], axis = 1)
+    lines = trimesh.load_path(segments)
+    scene = trimesh.Scene([new_mesh, lines])
+    scene.show()
