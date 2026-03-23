@@ -64,6 +64,39 @@ class EZMesh:
         ### Edge is a tuple of vertex idx, sorted from small to large
         return self.edge_to_face[edge]
 
+    def segment_based_on_normal(self, normal_thresh):
+        segmentation = []
+        face_grouped = [False for _ in range(my_mesh.num_faces)]
+
+        for i in range(self.num_faces):
+            if face_grouped[i] == True:
+                continue
+            curr_group = []
+            to_be_explored = Queue() 
+            to_be_explored.put(i)
+            explored = [False for _ in range(my_mesh.num_faces)]
+            explored[i] = True
+            face_grouped[i] = True
+            group_normal = my_mesh.normals[i]
+                        
+            while(not to_be_explored.empty()):
+                curr_face_idx = to_be_explored.get()
+                curr_group.append(curr_face_idx)
+                connected_faces = my_mesh.get_connected_faces_from_face(curr_face_idx)
+                for conn_face_idx in connected_faces:
+                    if explored[conn_face_idx] == True or face_grouped[conn_face_idx] == True:
+                        continue
+                    explored[conn_face_idx] = True
+                    next_normal = my_mesh.normals[conn_face_idx]
+                    angle = angle_between_vec(group_normal, next_normal)
+                    if angle < normal_thresh: 
+                        to_be_explored.put(conn_face_idx)
+                        face_grouped[conn_face_idx] = True
+
+            segmentation.append(curr_group)
+
+        return segmentation
+
 def angle_between_vec(v1, v2):
     assert (v1.shape == (3,1) and v1.shape==v2.shape) or (v1.shape == (3,) and v1.shape == v2.shape)
     cos_theta = np.dot(v1, v2)/(np.linalg.norm(v1)*np.linalg.norm(v2))
@@ -75,41 +108,9 @@ if __name__=="__main__":
 
     fname = "/home/zhenweil/mesh-processing/data/holding_eggs_under_arms.obj"   
     my_mesh = EZMesh(fname)
+    segmentation = my_mesh.segment_based_on_normal(90)
 
-    segmentation = []
-    face_grouped = [False for _ in range(my_mesh.num_faces)]
-    
-    for i in range(my_mesh.num_faces):
-        if face_grouped[i] == True:
-            continue
-
-        curr_group = []
-        to_be_explored = Queue() 
-        to_be_explored.put(i)
-        explored = [False for _ in range(my_mesh.num_faces)]
-        explored[i] = True
-        face_grouped[i] = True
-        group_normal = my_mesh.normals[i]
-                    
-        while(not to_be_explored.empty()):
-            curr_face_idx = to_be_explored.get()
-            curr_group.append(curr_face_idx)
-            connected_faces = my_mesh.get_connected_faces_from_face(curr_face_idx)
-            for conn_face_idx in connected_faces:
-                if explored[conn_face_idx] == True or face_grouped[conn_face_idx] == True:
-                    continue
-                explored[conn_face_idx] = True
-                next_normal = my_mesh.normals[conn_face_idx]
-                angle = angle_between_vec(group_normal, next_normal)
-                if angle < 45: 
-                    to_be_explored.put(conn_face_idx)
-                    face_grouped[conn_face_idx] = True
-                else:
-                    print("large angle deviation: ", angle)
-
-        segmentation.append(curr_group)
-        print(f"Finished group {len(segmentation)}")
-        print(f"Current face: {i}, total face: {my_mesh.num_faces}")
+    print("Number of segmentation: ", len(segmentation))
     
     num_groups = len(segmentation)
     colors = np.random.rand(num_groups, 3)
