@@ -29,13 +29,9 @@ class ConstrainedMeshVoronoi:
         adj = [[] for _ in range(self.n_faces)]
 
         for f1, f2 in self.edges:
-            spatial = np.linalg.norm(self.centers[f1] - self.centers[f2])
+            spatial = np.linalg.norm(self.centers[f1] - self.centers[f2]) # Euclidean distance between two faces
 
-            normal_penalty = 1.0 - np.clip(
-                np.dot(self.normals[f1], self.normals[f2]),
-                -1.0,
-                1.0,
-            ) # 1-dot(n1,n2) to evaluate normal difference
+            normal_penalty = 1.0 - np.clip(np.dot(self.normals[f1], self.normals[f2]), -1.0, 1.0)
 
             w = spatial * (1.0 + self.normal_weight * normal_penalty)
 
@@ -55,6 +51,7 @@ class ConstrainedMeshVoronoi:
             dist[seed] = 0.0
             heapq.heappush(pq, (0.0, seed, region_id))
 
+        # Use dijkstra to assign face to the seed
         while pq:
             d, u, region_id = heapq.heappop(pq)
 
@@ -91,8 +88,35 @@ class ConstrainedMeshVoronoi:
 
         return np.array(new_seeds, dtype=object)
 
+    def compute_face_curvature(self):
+        curvature = np.zeros(self.n_faces)
+
+        for f1, f2 in self.edges:
+            dot = np.clip(
+                np.dot(self.normals[f1], self.normals[f2]),
+                -1.0,
+                1.0,
+            )
+
+            angle = np.arccos(dot)
+
+            curvature[f1] += angle
+            curvature[f2] += angle
+
+        return curvature
+
     def fit(self, max_iter=30):
-        self.seeds = self.rng.choice(self.n_faces, self.k, replace=False)
+        curvature = self.compute_face_curvature()
+
+        prob = curvature + 1e-6
+        prob = prob / prob.sum()
+
+        self.seeds = self.rng.choice(
+            self.n_faces,
+            self.k,
+            replace=False,
+            p=prob,
+        )
 
         for _ in range(max_iter):
             labels, dist = self.constrained_voronoi(self.seeds)
@@ -155,7 +179,7 @@ if __name__=="__main__":
     segmenter = ConstrainedMeshVoronoi(
         "/home/zhenweil/mesh-processing/data/bunny_holding_eggs_repaired.stl",
         k=50,
-        normal_weight=100,
+        normal_weight=50,
         seed=1,
     )
 
