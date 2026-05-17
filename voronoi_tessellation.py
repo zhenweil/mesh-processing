@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 class ConstrainedMeshVoronoi:
-    def __init__(self, mesh, k=50, normal_weight=100, seed=None):
+    def __init__(self, mesh, k, normal_weight, seed=None):
         if isinstance(mesh, str):
             mesh = trimesh.load(mesh, force="mesh")
 
@@ -19,13 +19,13 @@ class ConstrainedMeshVoronoi:
         self.edges = self.mesh.face_adjacency
         self.n_faces = len(self.mesh.faces)
 
-        self.adj = self._build_adjacency()
+        self.adj = self.build_adjacency()
 
         self.seeds = None
         self.labels = None
         self.dist = None
 
-    def _build_adjacency(self):
+    def build_adjacency(self):
         adj = [[] for _ in range(self.n_faces)]
 
         for f1, f2 in self.edges:
@@ -35,7 +35,7 @@ class ConstrainedMeshVoronoi:
                 np.dot(self.normals[f1], self.normals[f2]),
                 -1.0,
                 1.0,
-            )
+            ) # 1-dot(n1,n2) to evaluate normal difference
 
             w = spatial * (1.0 + self.normal_weight * normal_penalty)
 
@@ -44,7 +44,7 @@ class ConstrainedMeshVoronoi:
 
         return adj
 
-    def _constrained_voronoi(self, seeds):
+    def constrained_voronoi(self, seeds):
         labels = -np.ones(self.n_faces, dtype=int)
         dist = np.full(self.n_faces, np.inf)
 
@@ -71,7 +71,7 @@ class ConstrainedMeshVoronoi:
 
         return labels, dist
 
-    def _update_seeds_medoid(self, labels):
+    def update_seeds_medoid(self, labels):
         new_seeds = []
 
         for region_id in range(self.k):
@@ -95,8 +95,8 @@ class ConstrainedMeshVoronoi:
         self.seeds = self.rng.choice(self.n_faces, self.k, replace=False)
 
         for _ in range(max_iter):
-            labels, dist = self._constrained_voronoi(self.seeds)
-            new_seeds = self._update_seeds_medoid(labels)
+            labels, dist = self.constrained_voronoi(self.seeds)
+            new_seeds = self.update_seeds_medoid(labels)
 
             for i in range(self.k):
                 if new_seeds[i] is None:
@@ -109,7 +109,7 @@ class ConstrainedMeshVoronoi:
 
             self.seeds = new_seeds
 
-        self.labels, self.dist = self._constrained_voronoi(self.seeds)
+        self.labels, self.dist = self.constrained_voronoi(self.seeds)
 
         segmentation = []
         centroids = []
@@ -156,7 +156,7 @@ if __name__=="__main__":
         "/home/zhenweil/mesh-processing/data/bunny_holding_eggs_repaired.stl",
         k=50,
         normal_weight=100,
-        seed=0,
+        seed=1,
     )
 
     labels = segmenter.fit(max_iter=30)
