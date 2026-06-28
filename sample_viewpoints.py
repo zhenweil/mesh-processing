@@ -171,7 +171,6 @@ def compute_visibility(mesh, candidates):
 
     return valid_candidates
 
-
 def greedy_select_viewpoints(mesh, candidates, min_new_faces=5):
     uncovered = set(range(len(mesh.faces)))
     selected = []
@@ -202,6 +201,27 @@ def greedy_select_viewpoints(mesh, candidates, min_new_faces=5):
 
     return selected, uncovered
 
+def compute_overall_visibility(mesh, selected):
+    """
+    Computes overall mesh visibility from selected viewpoints.
+
+    Returns:
+        visibility_ratio: fraction of mesh faces visible
+        visible_faces: set of all visible face IDs
+        uncovered_faces: set of invisible face IDs
+    """
+    total_faces = len(mesh.faces)
+
+    visible_faces = set()
+
+    for c in selected:
+        visible_faces |= c["visible_faces"]
+
+    uncovered_faces = set(range(total_faces)) - visible_faces
+
+    visibility_ratio = len(visible_faces) / total_faces
+
+    return visibility_ratio, visible_faces, uncovered_faces
 
 def plan_viewpoints(mesh_path):
     mesh = trimesh.load(mesh_path, force="mesh")
@@ -212,7 +232,7 @@ def plan_viewpoints(mesh_path):
 
     candidates = generate_view_candidates(
         mesh_plan,
-        n_surface_samples=50,
+        n_surface_samples=100,
         standoff_distances=(1, 3, 5),
         tilt_angles_deg=(0, 15, -15, 30, -30),
     )
@@ -229,6 +249,13 @@ def plan_viewpoints(mesh_path):
         min_new_faces=5,
     )
 
+    visibility_ratio, visible_faces, uncovered_faces = compute_overall_visibility(
+        mesh_plan,
+        selected,
+    )
+
+    print(f"Overall visibility: {visibility_ratio * 100:.2f}%")
+    
     viewpoints = np.array([c["camera_pos"] for c in selected])
     view_dirs = np.array([c["view_dir"] for c in selected])
 
@@ -297,10 +324,8 @@ if __name__ == "__main__":
     viewpoints, view_dirs, selected, uncovered = plan_viewpoints(mesh_path)
 
     print("\nFinal viewpoints:")
-    print(viewpoints)
 
     print("\nFinal view directions:")
-    print(view_dirs)
 
     print("\nNumber of selected views:", len(viewpoints))
     print("Number of uncovered faces:", len(uncovered))
