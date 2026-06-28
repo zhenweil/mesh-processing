@@ -5,6 +5,20 @@ import trimesh
 def normalize(v, eps=1e-9):
     return v / (np.linalg.norm(v, axis=-1, keepdims=True) + eps)
 
+def simplify_mesh(mesh, target_faces=5000):
+    print("Original faces:", len(mesh.faces))
+    print("Original vertices:", len(mesh.vertices))
+
+    simplified = mesh.simplify_quadric_decimation(face_count=target_faces)
+
+    # clean up after simplification
+    simplified.remove_unreferenced_vertices()
+    simplified.fix_normals()
+
+    print("Simplified faces:", len(simplified.faces))
+    print("Simplified vertices:", len(simplified.vertices))
+
+    return simplified
 
 def sample_surface_candidates(mesh, n_samples=1000):
     points, face_ids = trimesh.sample.sample_surface(mesh, n_samples)
@@ -56,7 +70,7 @@ def visible_faces_from_view(
     ray_intersector,
     face_centers,
     face_normals,
-    fov_deg=60,
+    fov_deg=20,
     max_distance=20.0,
     angle_threshold_deg=70,
     max_rays_per_view=None,
@@ -132,7 +146,6 @@ def compute_visibility(mesh, candidates):
 
     for i, c in enumerate(candidates):
         visible = visible_faces_from_view(
-            mesh,
             camera_pos=c["camera_pos"],
             view_dir=c["view_dir"],
             ray_intersector=ray_intersector,
@@ -193,21 +206,25 @@ def greedy_select_viewpoints(mesh, candidates, min_new_faces=5):
 def plan_viewpoints(mesh_path):
     mesh = trimesh.load(mesh_path, force="mesh")
 
+    # simplify for planning
+    mesh_plan = simplify_mesh(mesh, target_faces=500)
+    # mesh_plan.show()
+
     candidates = generate_view_candidates(
-        mesh,
-        n_surface_samples=3,
-        standoff_distances=(5,),
-        tilt_angles_deg=(0,),
+        mesh_plan,
+        n_surface_samples=50,
+        standoff_distances=(1, 3, 5),
+        tilt_angles_deg=(0, 15, -15, 30, -30),
     )
 
     print("candidate views:", len(candidates))
 
-    candidates = compute_visibility(mesh, candidates)
+    candidates = compute_visibility(mesh_plan, candidates)
 
     print("visible candidate views:", len(candidates))
 
     selected, uncovered = greedy_select_viewpoints(
-        mesh,
+        mesh_plan,
         candidates,
         min_new_faces=5,
     )
@@ -257,7 +274,7 @@ def visualize_views(mesh, viewpoints, view_dirs, arrow_length=0.08):
     scene.add_geometry(mesh_vis)
 
     for p, d in zip(viewpoints, view_dirs):
-        sphere = trimesh.creation.uv_sphere(radius=0.01)
+        sphere = trimesh.creation.uv_sphere(radius=0.2)
         sphere.visual.face_colors = [255, 0, 0, 255]
         sphere.apply_translation(p)
         scene.add_geometry(sphere)
@@ -266,7 +283,7 @@ def visualize_views(mesh, viewpoints, view_dirs, arrow_length=0.08):
             start=p,
             direction=d,
             length=arrow_length,
-            radius=0.002,
+            radius=0.05,
         )
         arrow.visual.face_colors = [0, 0, 255, 255]
         scene.add_geometry(arrow)
@@ -293,5 +310,5 @@ if __name__ == "__main__":
         mesh,
         viewpoints,
         view_dirs,
-        arrow_length=0.01,
+        arrow_length=1,
     )
