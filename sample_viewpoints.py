@@ -25,7 +25,6 @@ def sample_surface_candidates(mesh, n_samples=1000):
     normals = mesh.face_normals[face_ids]
     return points, normals, face_ids
 
-
 def generate_view_candidates(
     mesh,
     n_surface_samples,
@@ -63,6 +62,48 @@ def generate_view_candidates(
 
     return candidates
 
+def filter_candidates_by_clearance(mesh_collision, candidates, min_clearance=0.5):
+    """
+    Reject candidate camera positions that are inside the mesh
+    or too close to the mesh surface.
+
+    min_clearance is in mesh units.
+    Since your mesh is in cm, min_clearance=0.5 means 0.5 cm.
+    """
+
+    if len(candidates) == 0:
+        return []
+
+    camera_positions = np.array([c["camera_pos"] for c in candidates])
+
+    # Check if camera points are inside mesh
+    if mesh_collision.is_watertight:
+        inside = mesh_collision.contains(camera_positions)
+    else:
+        print("Warning: mesh is not watertight. inside/outside test may be unreliable.")
+        inside = np.zeros(len(candidates), dtype=bool)
+
+    # Check nearest distance to mesh surface
+    closest_points, distances, triangle_ids = trimesh.proximity.closest_point(
+        mesh_collision,
+        camera_positions
+    )
+
+    filtered = []
+
+    for c, is_inside, dist in zip(candidates, inside, distances):
+        if is_inside:
+            continue
+
+        if dist < min_clearance:
+            continue
+
+        filtered.append(c)
+
+    print("candidates before clearance filter:", len(candidates))
+    print("candidates after clearance filter:", len(filtered))
+
+    return filtered
 
 def visible_faces_from_view(
     camera_pos,
@@ -202,14 +243,6 @@ def greedy_select_viewpoints(mesh, candidates, min_new_faces=5):
     return selected, uncovered
 
 def compute_overall_visibility(mesh, selected):
-    """
-    Computes overall mesh visibility from selected viewpoints.
-
-    Returns:
-        visibility_ratio: fraction of mesh faces visible
-        visible_faces: set of all visible face IDs
-        uncovered_faces: set of invisible face IDs
-    """
     total_faces = len(mesh.faces)
 
     visible_faces = set()
@@ -219,25 +252,42 @@ def compute_overall_visibility(mesh, selected):
 
     uncovered_faces = set(range(total_faces)) - visible_faces
 
-    visibility_ratio = len(visible_faces) / total_faces
+    # Face-count visibility
+    face_visibility = len(visible_faces) / total_faces if total_faces > 0 else 0.0
 
-    return visibility_ratio, visible_faces, uncovered_faces
+    # Area-weighted visibility
+    face_areas = mesh.area_faces
+    total_area = np.sum(face_areas)
+
+    if len(visible_faces) > 0 and total_area > 0:
+        visible_ids = np.array(list(visible_faces), dtype=int)
+        visible_area = np.sum(face_areas[visible_ids])
+        area_visibility = visible_area / total_area
+    else:
+        area_visibility = 0.0
+
+    return face_visibility, area_visibility, visible_faces, uncovered_faces
 
 def plan_viewpoints(mesh_path):
-    mesh = trimesh.load(mesh_path, force="mesh")
+    mesh_original = trimesh.load(mesh_path, force="mesh")
 
-    # simplify for planning
-    mesh_plan = simplify_mesh(mesh, target_faces=500)
-    # mesh_plan.show()
+    mesh_plan = simplify_mesh(mesh_original, target_faces=500)
 
     candidates = generate_view_candidates(
         mesh_plan,
-        n_surface_samples=100,
-        standoff_distances=(1, 3, 5),
+        n_surface_samples=10,
+        standoff_distances=(3, 5, 8),
         tilt_angles_deg=(0, 15, -15, 30, -30),
     )
 
     print("candidate views:", len(candidates))
+
+    # Important: check candidate camera positions against the ORIGINAL mesh
+    candidates = filter_candidates_by_clearance(
+        mesh_original,
+        candidates,
+        min_clearance=0.5,   # cm
+    )
 
     candidates = compute_visibility(mesh_plan, candidates)
 
@@ -249,13 +299,19 @@ def plan_viewpoints(mesh_path):
         min_new_faces=5,
     )
 
-    visibility_ratio, visible_faces, uncovered_faces = compute_overall_visibility(
+    # Add overall visibility info here
+    face_visibility, area_visibility, visible_faces, uncovered_faces = compute_overall_visibility(
         mesh_plan,
         selected,
     )
 
-    print(f"Overall visibility: {visibility_ratio * 100:.2f}%")
-    
+    print("\nOverall visibility on planning mesh:")
+    print(f"  Face-count visibility: {face_visibility * 100:.2f}%")
+    print(f"  Area-weighted visibility: {area_visibility * 100:.2f}%")
+    print(f"  Visible faces: {len(visible_faces)}")
+    print(f"  Total faces: {len(mesh_plan.faces)}")
+    print(f"  Uncovered faces: {len(uncovered_faces)}")
+
     viewpoints = np.array([c["camera_pos"] for c in selected])
     view_dirs = np.array([c["view_dir"] for c in selected])
 
@@ -323,12 +379,7 @@ if __name__ == "__main__":
 
     viewpoints, view_dirs, selected, uncovered = plan_viewpoints(mesh_path)
 
-    print("\nFinal viewpoints:")
-
-    print("\nFinal view directions:")
-
     print("\nNumber of selected views:", len(viewpoints))
-    print("Number of uncovered faces:", len(uncovered))
 
     mesh = trimesh.load(mesh_path, force="mesh")
     visualize_views(
