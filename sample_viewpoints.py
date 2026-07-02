@@ -5,7 +5,7 @@ import trimesh
 def normalize(v, eps=1e-9):
     return v / (np.linalg.norm(v, axis=-1, keepdims=True) + eps)
 
-def simplify_mesh(mesh, target_faces=5000):
+def simplify_mesh(mesh, target_faces):
     print("Original faces:", len(mesh.faces))
     print("Original vertices:", len(mesh.vertices))
 
@@ -212,32 +212,74 @@ def compute_visibility(mesh, candidates):
 
     return valid_candidates
 
-def greedy_select_viewpoints(mesh, candidates, min_new_faces=5):
+def greedy_select_viewpoints_target_visibility(
+    mesh,
+    candidates,
+    target_area_visibility,
+    min_new_area_ratio,
+):
+    """
+    Select minimum-ish number of viewpoints until target area visibility is reached.
+
+    target_area_visibility:
+        Stop once this fraction of total mesh area is visible.
+
+    min_new_area_ratio:
+        Stop if the best remaining view adds less than this fraction of total area.
+        Example: 0.002 means 0.2% of total mesh area.
+    """
+
+    face_areas = mesh.area_faces
+    total_area = np.sum(face_areas)
+
     uncovered = set(range(len(mesh.faces)))
     selected = []
 
-    while uncovered:
+    visible_area = 0.0
+
+    while True:
         best = None
-        best_gain = 0
+        best_new_faces = None
+        best_gain_area = 0.0
 
         for c in candidates:
             new_faces = c["visible_faces"] & uncovered
-            gain = len(new_faces)
 
-            if gain > best_gain:
-                best_gain = gain
+            if len(new_faces) == 0:
+                continue
+
+            new_ids = np.array(list(new_faces), dtype=int)
+            gain_area = np.sum(face_areas[new_ids])
+
+            if gain_area > best_gain_area:
+                best_gain_area = gain_area
+                best_new_faces = new_faces
                 best = c
 
-        if best is None or best_gain < min_new_faces:
+        if best is None:
+            break
+
+        current_visibility = visible_area / total_area
+        new_area_ratio = best_gain_area / total_area
+
+        if current_visibility >= target_area_visibility:
+            break
+
+        if new_area_ratio < min_new_area_ratio:
+            print(
+                f"stopping: best new area only {new_area_ratio * 100:.3f}%"
+            )
             break
 
         selected.append(best)
-        uncovered -= best["visible_faces"]
+        uncovered -= best_new_faces
+        visible_area += best_gain_area
 
         print(
             f"selected={len(selected)}, "
-            f"new_faces={best_gain}, "
-            f"uncovered={len(uncovered)}"
+            f"new_area={new_area_ratio * 100:.2f}%, "
+            f"area_visibility={visible_area / total_area * 100:.2f}%, "
+            f"uncovered_faces={len(uncovered)}"
         )
 
     return selected, uncovered
@@ -273,7 +315,7 @@ def plan_viewpoints(mesh_path):
     # Convert cm to meters
     mesh_original.apply_scale(0.01)
 
-    mesh_plan = simplify_mesh(mesh_original, target_faces=500)
+    mesh_plan = simplify_mesh(mesh_original, target_faces=1000)
 
     candidates = generate_view_candidates(
         mesh_plan,
@@ -295,12 +337,12 @@ def plan_viewpoints(mesh_path):
 
     print("visible candidate views:", len(candidates))
 
-    selected, uncovered = greedy_select_viewpoints(
+    selected, uncovered = greedy_select_viewpoints_target_visibility(
         mesh_plan,
         candidates,
-        min_new_faces=1,
+        target_area_visibility=0.95,
+        min_new_area_ratio=0.001,
     )
-
     # Add overall visibility info here
     face_visibility, area_visibility, visible_faces, uncovered_faces = compute_overall_visibility(
         mesh_plan,
@@ -317,7 +359,7 @@ def plan_viewpoints(mesh_path):
     viewpoints = np.array([c["camera_pos"] for c in selected])
     view_dirs = np.array([c["view_dir"] for c in selected])
 
-    return viewpoints, view_dirs, selected, uncovered
+    return mesh_plan, viewpoints, view_dirs, selected, uncovered
 
 def make_arrow(start, direction, length=0.05, radius=0.003):
     direction = direction / (np.linalg.norm(direction) + 1e-9)
@@ -375,11 +417,55 @@ def visualize_views(mesh, viewpoints, view_dirs, arrow_length):
 
     scene.show()
 
+def visualize_coverage(mesh, selected):
+    """
+    Clean coverage visualization.
+
+    Green = covered
+    Red   = uncovered
+    """
+
+    scene = trimesh.Scene()
+
+    total_faces = len(mesh.faces)
+
+    covered_faces = set()
+    for c in selected:
+        covered_faces |= c["visible_faces"]
+
+    uncovered_faces = set(range(total_faces)) - covered_faces
+
+    covered_ids = np.array(sorted(list(covered_faces)), dtype=int)
+    uncovered_ids = np.array(sorted(list(uncovered_faces)), dtype=int)
+
+    if len(uncovered_ids) > 0:
+        uncovered_mesh = mesh.submesh(
+            [uncovered_ids],
+            append=True,
+            repair=False
+        )
+        uncovered_mesh.visual.face_colors = [255, 0, 0, 255]
+        scene.add_geometry(uncovered_mesh)
+
+    if len(covered_ids) > 0:
+        covered_mesh = mesh.submesh(
+            [covered_ids],
+            append=True,
+            repair=False
+        )
+        covered_mesh.visual.face_colors = [0, 255, 0, 255]
+        scene.add_geometry(covered_mesh)
+
+    print("Covered faces:", len(covered_faces))
+    print("Uncovered faces:", len(uncovered_faces))
+    print("Face visibility:", len(covered_faces) / total_faces * 100, "%")
+
+    scene.show()
 
 if __name__ == "__main__":
     mesh_path = "/home/zhenweil/mesh-processing/data/bunny_holding_eggs_repaired_cm.stl"
 
-    viewpoints, view_dirs, selected, uncovered = plan_viewpoints(mesh_path)
+    mesh_plan, viewpoints, view_dirs, selected, uncovered = plan_viewpoints(mesh_path)
 
     print("\nNumber of selected views:", len(viewpoints))
 
@@ -390,4 +476,9 @@ if __name__ == "__main__":
         viewpoints,
         view_dirs,
         arrow_length=0.01,
+    )
+
+    visualize_coverage(
+        mesh_plan,
+        selected
     )
