@@ -111,9 +111,9 @@ def visible_faces_from_view(
     ray_intersector,
     face_centers,
     face_normals,
-    fov_deg=20,
-    max_distance=20.0,
-    angle_threshold_deg=70,
+    fov_deg,
+    max_distance,
+    angle_threshold_deg,
     max_rays_per_view=None,
 ):
     to_faces = face_centers - camera_pos
@@ -192,7 +192,7 @@ def compute_visibility(mesh, candidates):
             ray_intersector=ray_intersector,
             face_centers=face_centers,
             face_normals=face_normals,
-            fov_deg=60,
+            fov_deg=30,
             max_distance=20.0,
             angle_threshold_deg=70,
             max_rays_per_view=2000,   # set to None for full exact check
@@ -270,14 +270,16 @@ def compute_overall_visibility(mesh, selected):
 
 def plan_viewpoints(mesh_path):
     mesh_original = trimesh.load(mesh_path, force="mesh")
+    # Convert cm to meters
+    mesh_original.apply_scale(0.01)
 
     mesh_plan = simplify_mesh(mesh_original, target_faces=500)
 
     candidates = generate_view_candidates(
         mesh_plan,
-        n_surface_samples=10,
-        standoff_distances=(3, 5, 8),
-        tilt_angles_deg=(0, 15, -15, 30, -30),
+        n_surface_samples=500,
+        standoff_distances=(0.01, 0.02, 0.03),
+        tilt_angles_deg=(0, 15, -15),
     )
 
     print("candidate views:", len(candidates))
@@ -286,7 +288,7 @@ def plan_viewpoints(mesh_path):
     candidates = filter_candidates_by_clearance(
         mesh_original,
         candidates,
-        min_clearance=0.5,   # cm
+        min_clearance=0.005,   # m
     )
 
     candidates = compute_visibility(mesh_plan, candidates)
@@ -296,7 +298,7 @@ def plan_viewpoints(mesh_path):
     selected, uncovered = greedy_select_viewpoints(
         mesh_plan,
         candidates,
-        min_new_faces=5,
+        min_new_faces=1,
     )
 
     # Add overall visibility info here
@@ -349,7 +351,7 @@ def make_arrow(start, direction, length=0.05, radius=0.003):
 
     return trimesh.util.concatenate([arrow, cone])
 
-def visualize_views(mesh, viewpoints, view_dirs, arrow_length=0.08):
+def visualize_views(mesh, viewpoints, view_dirs, arrow_length):
     scene = trimesh.Scene()
 
     mesh_vis = mesh.copy()
@@ -357,7 +359,7 @@ def visualize_views(mesh, viewpoints, view_dirs, arrow_length=0.08):
     scene.add_geometry(mesh_vis)
 
     for p, d in zip(viewpoints, view_dirs):
-        sphere = trimesh.creation.uv_sphere(radius=0.2)
+        sphere = trimesh.creation.uv_sphere(radius=0.003)
         sphere.visual.face_colors = [255, 0, 0, 255]
         sphere.apply_translation(p)
         scene.add_geometry(sphere)
@@ -366,7 +368,7 @@ def visualize_views(mesh, viewpoints, view_dirs, arrow_length=0.08):
             start=p,
             direction=d,
             length=arrow_length,
-            radius=0.05,
+            radius=0.0005,
         )
         arrow.visual.face_colors = [0, 0, 255, 255]
         scene.add_geometry(arrow)
@@ -382,9 +384,10 @@ if __name__ == "__main__":
     print("\nNumber of selected views:", len(viewpoints))
 
     mesh = trimesh.load(mesh_path, force="mesh")
+    mesh.apply_scale(0.01)
     visualize_views(
         mesh,
         viewpoints,
         view_dirs,
-        arrow_length=1,
+        arrow_length=0.01,
     )
